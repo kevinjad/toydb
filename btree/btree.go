@@ -302,3 +302,49 @@ func (tree *BTree) Insert(key []byte, val []byte) {
 		tree.root = tree.new(split[0])
 	}
 }
+
+func shouldMerge(tree *BTree, node BNode, idx uint16, updated BNode) (int, BNode) {
+	if updated.nBytes() > BTREE_PAGE_SIZE/4 {
+		return 0, BNode{}
+	}
+	var sibling BNode
+	if idx > 0 {
+		sibling = tree.get(node.getPtr(idx - 1))
+		mergedBytes := sibling.nBytes() + updated.nBytes() - HEADER
+		if mergedBytes <= BTREE_PAGE_SIZE {
+			return -1, sibling
+		}
+	}
+	if idx+1 < node.nkeys() {
+		sibling = tree.get(node.getPtr(idx + 1))
+		mergedBytes := sibling.nBytes() + updated.nBytes() - HEADER
+		if mergedBytes <= BTREE_PAGE_SIZE {
+			return 1, sibling
+		}
+	}
+	return 0, BNode{}
+}
+
+// remove a key from a leaf node
+func leafDelete(new BNode, old BNode, idx uint16) {
+	new.setHeader(LEAF, old.nkeys()-1)
+	nodeAppendRangeKV(new, old, 0, 0, idx)
+	nodeAppendRangeKV(new, old, idx, idx+1, old.nkeys()-(idx+1))
+}
+
+// merge 2 nodes into 1
+func nodeMerge(new BNode, left BNode, right BNode) {
+	new.setHeader(left.btype(), left.nkeys()+right.nkeys())
+	nodeAppendRangeKV(new, left, 0, 0, left.nkeys())
+	nodeAppendRangeKV(new, right, left.nkeys(), 0, right.nkeys())
+}
+
+// replace 2 adjacent links with 1
+func nodeReplace2Kid(
+	new BNode, old BNode, idx uint16, ptr uint64, key []byte,
+) {
+	new.setHeader(old.btype(), old.nkeys()-1)
+	nodeAppendRangeKV(new, old, 0, 0, idx)
+	nodeAppendKV(new, idx, ptr, key, nil)
+	nodeAppendRangeKV(new, old, idx+1, idx+2, old.nkeys()-(idx+2))
+}
