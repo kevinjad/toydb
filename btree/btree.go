@@ -340,11 +340,58 @@ func nodeMerge(new BNode, left BNode, right BNode) {
 }
 
 // replace 2 adjacent links with 1
-func nodeReplace2Kid(
-	new BNode, old BNode, idx uint16, ptr uint64, key []byte,
-) {
+func nodeReplace2Kid(new BNode, old BNode, idx uint16, ptr uint64, key []byte) {
 	new.setHeader(old.btype(), old.nkeys()-1)
 	nodeAppendRangeKV(new, old, 0, 0, idx)
 	nodeAppendKV(new, idx, ptr, key, nil)
 	nodeAppendRangeKV(new, old, idx+1, idx+2, old.nkeys()-(idx+2))
+}
+
+func treeDelete(tree *BTree, node BNode, key []byte) BNode {
+	new := make(BNode, BTREE_PAGE_SIZE)
+	idx := nodeLookUpLE(node, key)
+	switch node.btype() {
+	case LEAF:
+		if bytes.Equal(key, node.getKey(idx)) {
+			leafDelete(new, node, idx)
+		} else {
+			return BNode{}
+		}
+	case INTERNAL:
+		new = nodeDelete(tree, node, idx, key)
+	default:
+		panic("bad node")
+	}
+	return new
+}
+
+func nodeDelete(tree *BTree, node BNode, idx uint16, key []byte) BNode {
+	ptr := node.getPtr(idx)
+	updated := treeDelete(tree, tree.get(ptr), key)
+
+	if len(updated) == 0 {
+		return BNode{}
+	}
+
+	tree.del(ptr)
+	new := BNode(make([]byte, BTREE_PAGE_SIZE))
+	mergeDir, sibling := shouldMerge(tree, node, idx, updated)
+	switch {
+	case mergeDir < 0: // left
+		merged := BNode(make([]byte, BTREE_PAGE_SIZE))
+		nodeMerge(merged, sibling, updated)
+		tree.del(node.getPtr(idx - 1))
+		nodeReplace2Kid(new, node, idx-1, tree.new(merged), merged.getKey(0))
+	case mergeDir > 0: // right
+		merged := BNode(make([]byte, BTREE_PAGE_SIZE))
+		nodeMerge(merged, updated, sibling)
+		tree.del(node.getPtr(idx + 1))
+		nodeReplace2Kid(new, node, idx, tree.new(merged), merged.getKey(0))
+	case mergeDir == 0 && updated.nkeys() == 0:
+		assert(node.nkeys() == 1 && idx == 0) // 1 empty child but no sibling
+		new.setHeader(INTERNAL, 0)            // the parent becomes empty too
+	case mergeDir == 0 && updated.nkeys() > 0: // no merge
+		nodeReplaceRangeKids(tree, new, node, idx, updated)
+	}
+	return new
 }

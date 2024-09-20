@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"testing"
+	"unsafe"
 )
 
 func TestCreateBNode(t *testing.T) {
@@ -56,4 +57,47 @@ func TestCreateBNode2(t *testing.T) {
 	fmt.Println(string(node.getKey(2)))
 	fmt.Println(string(node.getVal(2)))
 
+}
+
+type C struct {
+	tree  BTree
+	ref   map[string]string // the reference data
+	pages map[uint64]BNode  // in-memory pages
+}
+
+func newC() *C {
+	pages := map[uint64]BNode{}
+	return &C{
+		tree: BTree{
+			get: func(ptr uint64) []byte {
+				node, ok := pages[ptr]
+				assert(ok)
+				return node
+			},
+			new: func(node []byte) uint64 {
+				assert(BNode(node).nBytes() <= BTREE_PAGE_SIZE)
+				ptr := uint64(uintptr(unsafe.Pointer(&node[0])))
+				assert(pages[ptr] == nil)
+				pages[ptr] = node
+				return ptr
+			},
+			del: func(ptr uint64) {
+				assert(pages[ptr] != nil)
+				delete(pages, ptr)
+			},
+		},
+		ref:   map[string]string{},
+		pages: pages,
+	}
+}
+
+func (c *C) add(key string, val string) {
+	c.tree.Insert([]byte(key), []byte(val))
+	c.ref[key] = val // reference data
+}
+
+func TestBtreeWithInMemoryPages(t *testing.T) {
+	c := newC()
+	c.add("Kevin", "Abishek")
+	fmt.Println("TestBtreeWithInMemoryPages completed")
 }
